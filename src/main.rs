@@ -12,14 +12,15 @@ extern crate tokio_io;
 extern crate tokio_openssl;
 
 use failure::Error;
+use futures::future::ok;
 use structopt::StructOpt;
-use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use tokio_io::codec::LinesCodec;
 
 const ADDR: &'static str = "127.0.0.1:12345";
 
+/// Use `structopt` to declare our command-line arguments.
 #[derive(Debug, StructOpt)]
 #[structopt(name = "toy-tokio-queue")]
 enum Opt {
@@ -29,6 +30,7 @@ enum Opt {
     Client,
 }
 
+/// Parse our command-line arguments and dispatch.
 fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
     match opt {
@@ -37,6 +39,7 @@ fn main() -> Result<(), Error> {
     }
 }
 
+/// Our server.
 fn server() -> Result<(), Error> {
     // Bind the server's socket
     let addr = ADDR.parse()?;
@@ -76,18 +79,22 @@ fn server() -> Result<(), Error> {
     Ok(())
 }
 
+/// Our client.
 fn client() -> Result<(), Error> {
     let addr = ADDR.parse()?;
+
     let client = TcpStream::connect(&addr)
-        .and_then(|tcp| {
-            let (reader, mut writer) = tcp.split();
-            writer.write_all(b"Hello!\n")?;
-            writer.flush()?;
-            Ok(reader)
+        .and_then(move |tcp| {
+            let framed = tcp.framed(LinesCodec::new());
+            let (sink, stream) = framed.split();
+            (sink.send("Hello!".to_owned()), ok(stream)).into_future()
         })
-        .and_then(|reader| {
-            eprintln!("Copying back");
-            io::copy(reader, io::stdout())
+        .and_then(move |(_sink, stream)| {
+            eprintln!("(receiving)");
+            stream.for_each(|line| {
+                println!("{}", line);
+                Ok(())
+            })
         })
         .map(|_| {
             println!("Done!");
