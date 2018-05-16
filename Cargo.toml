@@ -4,4 +4,11 @@ version = "0.1.0"
 authors = ["Eric Kidd <git@randomhacks.net>"]
 
 [dependencies]
+bytes = "0.4"
+failure = "0.1"
+futures = "0.1"
+structopt = "0.2"
+openssl = "0.10"
 tokio = "0.1"
+tokio-io = "0.1"
+tokio-openssl = "0.2"
