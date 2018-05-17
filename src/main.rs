@@ -2,6 +2,7 @@
 //! https://tokio.rs/
 
 extern crate bytes;
+#[macro_use]
 extern crate failure;
 extern crate futures;
 extern crate openssl;
@@ -10,6 +11,8 @@ extern crate structopt;
 extern crate tokio;
 extern crate tokio_io;
 extern crate tokio_openssl;
+
+mod connection;
 
 use failure::Error;
 use std::time::{Duration, Instant};
