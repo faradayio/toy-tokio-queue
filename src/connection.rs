@@ -1,5 +1,8 @@
 use failure;
 use futures::{Future, Sink, Stream, sync::mpsc};
+use std::net::{SocketAddr, ToSocketAddrs};
+use tokio::net::TcpStream;
+
 
 /// For this toy implementation, our `Frame`s are just single lines of text.
 type Frame = String;
@@ -12,7 +15,7 @@ type AMQPResult<T> = Result<T, failure::Error>;
 
 /// A connection to an AMQP server.
 pub struct Connection {
-
+    stream: TcpStream,
 }
 
 impl Connection {
@@ -24,14 +27,27 @@ impl Connection {
 
     /// Open a regular TCP connection to the specified address.
     pub fn open(host: &str, port: u16) -> AMQPResult<Connection> {
-        unimplemented!()
+        let addr = socket_addr(host, port)?;
+        TcpStream::connect(&addr).wait()
+            .map(|tcp| Connection { stream: tcp })
+            .map_err(|err| format_err!("could not connect: {}", err))
     }
 
     /// Split this connection into an independent `(ReadConnection,
     /// WriteConnection)` pair.
     pub fn split(self) -> (ReadConnection, WriteConnection) {
+        //let (sink, stream) = self.stream.split();
         unimplemented!()
     }
+}
+
+/// Convert a hostname and port into an IP address
+fn socket_addr(host: &str, port: u16) -> AMQPResult<SocketAddr> {
+    (host, port).to_socket_addrs()?
+        .next()
+        .ok_or_else(|| {
+            format_err!("could not look up addr")
+        })
 }
 
 /// A connection which can read frames from an AMQP server.
