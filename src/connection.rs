@@ -36,13 +36,35 @@ impl Connection {
 
 /// A connection which can read frames from an AMQP server.
 pub struct ReadConnection {
-    receiver: mpsc::Receiver<Frame>,
+    receiver: Option<mpsc::Receiver<Frame>>,
 }
 
 impl ReadConnection {
     /// Read the next frame. Blocking.
     pub fn read(&mut self) -> AMQPResult<Frame> {
-        unimplemented!()
+        // Take ownership of the `receiver` so we can pass it to `into_future`.
+        // This will fail if a previous `read` failed.
+        let receiver = self.receiver.take().ok_or_else(|| {
+            format_err!("tried to receive, but there's no sender")
+        })?;
+
+        // Use `into_future` to wait for the next item received on our stream.
+        // This returns the next value in stream, as well as `rest`, which
+        // is a stream that will return any following values.
+        match receiver.into_future().wait() {
+            // We received a value normally, so replace `self.receiver` with
+            // our new `receiver`
+            Ok((Some(frame), rest)) => {
+                self.receiver = Some(rest);
+                Ok(frame)
+            }
+            Ok((None, _rest)) => {
+                Err(format_err!("end of stream (no more data)"))
+            }
+            Err(((), _rest)) => {
+                Err(format_err!("end of stream (sender dropped)"))
+            }
+        }
     }
 }
 
