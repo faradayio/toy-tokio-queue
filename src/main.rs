@@ -12,10 +12,12 @@ extern crate tokio_io;
 extern crate tokio_openssl;
 
 use failure::Error;
-use futures::future::ok;
+use std::time::{Duration, Instant};
 use structopt::StructOpt;
+use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
+use tokio::timer::Interval;
 use tokio_io::codec::LinesCodec;
 
 const ADDR: &'static str = "127.0.0.1:12345";
@@ -53,8 +55,23 @@ fn server() -> Result<(), Error> {
         // Split up the read and write halves
         let (sink, stream) = framed.split();
 
-        // Copy the data back to the client
-        let conn = stream.forward(sink)
+        // Send messages periodically.
+        let messages = Interval::new(Instant::now(), Duration::from_secs(2))
+            .map(|inst| format!("message at {:?}", inst))
+            .map_err(|err| -> io::Error {
+                io::Error::new(io::ErrorKind::Other, format!("{}", err))
+            })
+            .forward(sink)
+            .map(|_| {})
+            .map_err(|err| eprint!("ERROR: {}", err));
+        tokio::spawn(messages);
+
+        // Print messages sent by the client.
+        let conn = stream
+            .for_each(|message| {
+                println!("FROM CLIENT: {:?}", message);
+                Ok(())
+            })
             // print what happened
             .map(|_| {
                 println!("echoed");
@@ -63,8 +80,6 @@ fn server() -> Result<(), Error> {
             .map_err(|err| {
                 println!("IO error {:?}", err)
             });
-
-        // Spawn the future as a concurrent task
         tokio::spawn(conn);
 
         Ok(())
@@ -85,15 +100,15 @@ fn client() -> Result<(), Error> {
 
     let client = TcpStream::connect(&addr)
         .and_then(move |tcp| {
+            // Convert the raw socket into a line-oriented stream, and split
+            // the read and write halves.
             let framed = tcp.framed(LinesCodec::new());
             let (sink, stream) = framed.split();
-            (sink.send("Hello!".to_owned()), ok(stream)).into_future()
-        })
-        .and_then(move |(_sink, stream)| {
-            eprintln!("(receiving)");
-            stream.for_each(|line| {
-                println!("{}", line);
-                Ok(())
+
+            // Print out the messages that we receive.
+            stream.fold(sink, move |sink, line| {
+                println!("FROM SERVER: {:?}", line);
+                sink.send("ACK".into())
             })
         })
         .map(|_| {
