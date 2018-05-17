@@ -2,6 +2,7 @@ use failure;
 use futures::{Future, Sink, Stream, sync::mpsc};
 use openssl::ssl::{SslConnector, SslMethod};
 use std::net::{SocketAddr, ToSocketAddrs};
+use tokio;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio_io::{AsyncRead, AsyncWrite, codec::LinesCodec};
@@ -20,10 +21,10 @@ type AMQPResult<T> = Result<T, failure::Error>;
 pub struct Connection {
     /// A readable stream of `Frame`s, boxed so that we don't have know exactly
     /// how it's implemented and we can treat it as an abstract interface.
-    stream: Box<Stream<Item = Frame, Error = io::Error>>,
+    stream: Box<Stream<Item = Frame, Error = io::Error> + Send + Sync>,
 
     /// A writable sink for `Frame`s.
-    sink: Box<Sink<SinkItem = Frame, SinkError = io::Error>>,
+    sink: Box<Sink<SinkItem = Frame, SinkError = io::Error> + Send + Sync>,
 }
 
 impl Connection {
@@ -84,6 +85,14 @@ impl Connection {
             receiver: Some(read_receiver),
         };
 
+        // Copy inbound frames from `stream` to `read_sender`.
+        let reader = stream
+            .map_err(|err| -> AMQPError { err.into() })
+            .forward(read_sender)
+            .map(|_| { eprintln!("reader done") })
+            .map_err(|e| { eprintln!("reader failed") });
+        tokio::spawn(reader);
+
         // Set up our `WriteConnection`.
         let (write_sender, write_receiver) = mpsc::channel(0);
         let write_conn = WriteConnection {
@@ -91,8 +100,13 @@ impl Connection {
             sender: Some(write_sender),
         };
 
-        // TODO: Bind `stream` to `read_sender`, and `write_receiver` to `sink`.
-        unimplemented!();
+        // Copy outbound frames from `write_receiver` to `sink`.
+        let writer = write_receiver
+            .map_err(|()| { format_err!("all writers gone") })
+            .forward(sink)
+            .map(|_| { eprintln!("writer done") })
+            .map_err(|e| { eprintln!("writer failed: {}", e) });
+        tokio::spawn(writer);
 
         (read_conn, write_conn)
     }
