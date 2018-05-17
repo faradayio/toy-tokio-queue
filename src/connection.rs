@@ -16,22 +16,13 @@ type AMQPError = failure::Error;
 /// Our result type.
 type AMQPResult<T> = Result<T, failure::Error>;
 
-/// An `AsyncDuplex` value supports both `AsyncRead` and `AsyncWrite`. We define
-/// this trait to that we have an easy way to generalize over `TcpStream` and
-/// `SslStream<TcpStream>`.
-trait AsyncDuplex: io::AsyncRead + io::AsyncWrite {}
-
-impl AsyncDuplex for TcpStream {
-
-}
-
-impl AsyncDuplex for SslStream<TcpStream> {
-
-}
-
 /// A connection to an AMQP server.
 pub struct Connection {
+    /// A readable stream of `Frame`s, boxed so that we don't have know exactly
+    /// how it's implemented and we can treat it as an abstract interface.
     stream: Box<Stream<Item = Frame, Error = io::Error>>,
+
+    /// A writable sink for `Frame`s.
     sink: Box<Sink<SinkItem = Frame, SinkError = io::Error>>,
 }
 
@@ -50,6 +41,7 @@ impl Connection {
                         io::Error::new(io::ErrorKind::Other, err)
                     })
             })
+            // TODO: Send AMQP protocol magic, maybe in codec.
             .wait()
             .map(|tls| {
                 // Break into frames and split now, because this is much easier
@@ -66,6 +58,7 @@ impl Connection {
     /// Open a regular TCP connection to the specified address.
     pub fn open(host: &str, port: u16) -> AMQPResult<Connection> {
         let addr = socket_addr(host, port)?;
+        // TODO: Send AMQP protocol magic, maybe in codec.
         TcpStream::connect(&addr).wait()
             .map(|tcp| {
                 // Break into frames and split now, because this is much easier
@@ -82,7 +75,26 @@ impl Connection {
     /// Split this connection into an independent `(ReadConnection,
     /// WriteConnection)` pair.
     pub fn split(self) -> (ReadConnection, WriteConnection) {
-        unimplemented!()
+        // Consume our `self`, and extract our `sink` and `stream`.
+        let (sink, stream) = (self.sink, self.stream);
+
+        // Set up our `ReadConnection`.
+        let (read_sender, read_receiver) = mpsc::channel(0);
+        let read_conn = ReadConnection {
+            receiver: Some(read_receiver),
+        };
+
+        // Set up our `WriteConnection`.
+        let (write_sender, write_receiver) = mpsc::channel(0);
+        let write_conn = WriteConnection {
+            frame_max_limit: 131072,
+            sender: Some(write_sender),
+        };
+
+        // TODO: Bind `stream` to `read_sender`, and `write_receiver` to `sink`.
+        unimplemented!();
+
+        (read_conn, write_conn)
     }
 }
 
