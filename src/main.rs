@@ -118,7 +118,14 @@ fn client() -> Result<(), Error> {
             eprintln!("client error: {:?}", err);
         });
 
-    tokio::run(client);
+    // Shut down the client after a timer future expires.
+    let client_timeout = client
+        .deadline(Instant::now() + Duration::from_secs(10))
+        .map_err(|_| {
+            eprintln!("client shutdown");
+        });
+
+    tokio::run(client_timeout);
 
     Ok(())
 }
