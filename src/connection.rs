@@ -1,8 +1,10 @@
 use failure;
 use futures::{Future, Sink, Stream, sync::mpsc};
+use openssl::ssl::{SslConnector, SslMethod};
 use std::net::{SocketAddr, ToSocketAddrs};
+use tokio::io;
 use tokio::net::TcpStream;
-
+use tokio_openssl::{SslConnectorExt, SslStream};
 
 /// For this toy implementation, our `Frame`s are just single lines of text.
 type Frame = String;
@@ -13,23 +15,44 @@ type AMQPError = failure::Error;
 /// Our result type.
 type AMQPResult<T> = Result<T, failure::Error>;
 
+/// An `AsyncDuplex` value supports both `AsyncRead` and `AsyncWrite`. We define
+/// this trait to that we have an easy way to generalize over `TcpStream` and
+/// `SslStream<TcpStream>`.
+trait AsyncDuplex: io::AsyncRead + io::AsyncWrite {}
+
+impl AsyncDuplex for TcpStream {}
+impl AsyncDuplex for SslStream<TcpStream> {}
+
 /// A connection to an AMQP server.
 pub struct Connection {
-    stream: TcpStream,
+    stream: Box<AsyncDuplex>,
 }
 
 impl Connection {
     /// Open a TLS connection to the specified address.
     #[cfg(feature = "tls")]
     pub fn open_tls(host: &str, port: u16) -> AMQPResult<Connection> {
-        unimplemented!()
+        let addr = socket_addr(host, port)?;
+        TcpStream::connect(&addr)
+            .and_then(|tcp: TcpStream| {
+                SslConnector::builder(SslMethod::tls())
+                    .expect("could not create builder")
+                    .build()
+                    .connect_async(host, tcp)
+                    .map_err(|err| {
+                        io::Error::new(io::ErrorKind::Other, err)
+                    })
+            })
+            .wait()
+            .map(|tls| Connection { stream: Box::new(tls) })
+            .map_err(|err| format_err!("could not connect: {}", err))
     }
 
     /// Open a regular TCP connection to the specified address.
     pub fn open(host: &str, port: u16) -> AMQPResult<Connection> {
         let addr = socket_addr(host, port)?;
         TcpStream::connect(&addr).wait()
-            .map(|tcp| Connection { stream: tcp })
+            .map(|tcp| Connection { stream: Box::new(tcp) })
             .map_err(|err| format_err!("could not connect: {}", err))
     }
 
