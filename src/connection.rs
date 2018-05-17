@@ -4,6 +4,7 @@ use openssl::ssl::{SslConnector, SslMethod};
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio::io;
 use tokio::net::TcpStream;
+use tokio_io::{AsyncRead, AsyncWrite, codec::LinesCodec};
 use tokio_openssl::{SslConnectorExt, SslStream};
 
 /// For this toy implementation, our `Frame`s are just single lines of text.
@@ -20,12 +21,18 @@ type AMQPResult<T> = Result<T, failure::Error>;
 /// `SslStream<TcpStream>`.
 trait AsyncDuplex: io::AsyncRead + io::AsyncWrite {}
 
-impl AsyncDuplex for TcpStream {}
-impl AsyncDuplex for SslStream<TcpStream> {}
+impl AsyncDuplex for TcpStream {
+
+}
+
+impl AsyncDuplex for SslStream<TcpStream> {
+
+}
 
 /// A connection to an AMQP server.
 pub struct Connection {
-    stream: Box<AsyncDuplex>,
+    stream: Box<Stream<Item = Frame, Error = io::Error>>,
+    sink: Box<Sink<SinkItem = Frame, SinkError = io::Error>>,
 }
 
 impl Connection {
@@ -44,7 +51,15 @@ impl Connection {
                     })
             })
             .wait()
-            .map(|tls| Connection { stream: Box::new(tls) })
+            .map(|tls| {
+                // Break into frames and split now, because this is much easier
+                // before we stick this in a `Box` and lose type information.
+                let (sink, stream) = tls.framed(LinesCodec::new()).split();
+                Connection {
+                    sink: Box::new(sink),
+                    stream: Box::new(stream),
+                }
+            })
             .map_err(|err| format_err!("could not connect: {}", err))
     }
 
@@ -52,14 +67,21 @@ impl Connection {
     pub fn open(host: &str, port: u16) -> AMQPResult<Connection> {
         let addr = socket_addr(host, port)?;
         TcpStream::connect(&addr).wait()
-            .map(|tcp| Connection { stream: Box::new(tcp) })
+            .map(|tcp| {
+                // Break into frames and split now, because this is much easier
+                // before we stick this in a `Box` and lose type information.
+                let (sink, stream) = tcp.framed(LinesCodec::new()).split();
+                Connection {
+                    sink: Box::new(sink),
+                    stream: Box::new(stream),
+                }
+            })
             .map_err(|err| format_err!("could not connect: {}", err))
     }
 
     /// Split this connection into an independent `(ReadConnection,
     /// WriteConnection)` pair.
     pub fn split(self) -> (ReadConnection, WriteConnection) {
-        //let (sink, stream) = self.stream.split();
         unimplemented!()
     }
 }
