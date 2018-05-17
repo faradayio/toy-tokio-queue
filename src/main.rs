@@ -102,17 +102,15 @@ fn server() -> Result<(), Error> {
 /// Our client.
 fn client() -> Result<(), Error> {
 
-        let conn = Connection::open("127.0.0.1", 12345)?;
-        let (mut read_conn, write_conn) = conn.split();
-        loop {
-            let line = read_conn.read()?;
-            let mut write_conn = write_conn.clone();
-            ::std::thread::spawn(move || {
-                println!("FROM SERVER: {:?}", line);
-                write_conn.write("ACK".into())
-                    .expect("could not ACK message");
-            });
-        }
-
-    Ok(())
+    let conn = Connection::open("127.0.0.1", 12345)?;
+    let (mut read_conn, write_conn) = conn.split();
+    loop {
+        let line = read_conn.read()?;
+        let mut write_conn = write_conn.clone();
+        ::std::thread::spawn(move || {
+            println!("FROM SERVER: {:?}", line);
+            write_conn.write("ACK".into())
+                .expect("could not ACK message");
+        });
+    }
 }
