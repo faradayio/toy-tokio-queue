@@ -63,7 +63,7 @@ fn server() -> Result<(), Error> {
             })
             .forward(sink)
             .map(|_| {})
-            .map_err(|err| eprint!("ERROR: {}", err));
+            .map_err(|err| eprintln!("ERROR: {}", err));
         tokio::spawn(messages);
 
         // Print messages sent by the client.
@@ -78,14 +78,14 @@ fn server() -> Result<(), Error> {
             })
             // Handle any errors
             .map_err(|err| {
-                println!("IO error {:?}", err)
+                eprintln!("IO error {:?}", err)
             });
         tokio::spawn(conn);
 
         Ok(())
     })
     .map_err(|err| {
-        println!("server error {:?}", err);
+        eprintln!("server error {:?}", err);
     });
 
     // Start the runtime and spin up the server
@@ -99,14 +99,14 @@ fn client() -> Result<(), Error> {
     let addr = ADDR.parse()?;
 
     let client = TcpStream::connect(&addr)
-        .and_then(move |tcp| {
+        .and_then(|tcp| {
             // Convert the raw socket into a line-oriented stream, and split
             // the read and write halves.
             let framed = tcp.framed(LinesCodec::new());
             let (sink, stream) = framed.split();
 
             // Print out the messages that we receive.
-            stream.fold(sink, move |sink, line| {
+            stream.fold(sink, |sink, line| {
                 println!("FROM SERVER: {:?}", line);
                 sink.send("ACK".into())
             })
