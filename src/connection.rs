@@ -1,12 +1,13 @@
 use failure;
 use futures::{Future, Sink, Stream, sync::mpsc};
 use openssl::ssl::{SslConnector, SslMethod};
+use std::thread;
 use std::net::{SocketAddr, ToSocketAddrs};
 use tokio;
 use tokio::io;
 use tokio::net::TcpStream;
-use tokio_io::{AsyncRead, AsyncWrite, codec::LinesCodec};
-use tokio_openssl::{SslConnectorExt, SslStream};
+use tokio_io::{AsyncRead, codec::LinesCodec};
+use tokio_openssl::SslConnectorExt;
 
 /// For this toy implementation, our `Frame`s are just single lines of text.
 type Frame = String;
@@ -90,8 +91,7 @@ impl Connection {
             .map_err(|err| -> AMQPError { err.into() })
             .forward(read_sender)
             .map(|_| { eprintln!("reader done") })
-            .map_err(|e| { eprintln!("reader failed") });
-        tokio::spawn(reader);
+            .map_err(|e| { eprintln!("reader failed: {}", e) });
 
         // Set up our `WriteConnection`.
         let (write_sender, write_receiver) = mpsc::channel(0);
@@ -106,7 +106,11 @@ impl Connection {
             .forward(sink)
             .map(|_| { eprintln!("writer done") })
             .map_err(|e| { eprintln!("writer failed: {}", e) });
-        tokio::spawn(writer);
+
+        // Fire up a background thread to handle our futures.
+        thread::spawn(move || {
+            tokio::run(reader.join(writer).map(|_| ()));
+        });
 
         (read_conn, write_conn)
     }

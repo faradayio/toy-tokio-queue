@@ -23,6 +23,8 @@ use tokio::prelude::*;
 use tokio::timer::Interval;
 use tokio_io::codec::LinesCodec;
 
+use connection::Connection;
+
 const ADDR: &'static str = "127.0.0.1:12345";
 
 /// Use `structopt` to declare our command-line arguments.
@@ -99,36 +101,18 @@ fn server() -> Result<(), Error> {
 
 /// Our client.
 fn client() -> Result<(), Error> {
-    let addr = ADDR.parse()?;
 
-    let client = TcpStream::connect(&addr)
-        .and_then(|tcp| {
-            // Convert the raw socket into a line-oriented stream, and split
-            // the read and write halves.
-            let framed = tcp.framed(LinesCodec::new());
-            let (sink, stream) = framed.split();
-
-            // Print out the messages that we receive.
-            stream.fold(sink, |sink, line| {
+        let conn = Connection::open("127.0.0.1", 12345)?;
+        let (mut read_conn, write_conn) = conn.split();
+        loop {
+            let line = read_conn.read()?;
+            let mut write_conn = write_conn.clone();
+            ::std::thread::spawn(move || {
                 println!("FROM SERVER: {:?}", line);
-                sink.send("ACK".into())
-            })
-        })
-        .map(|_| {
-            println!("Done!");
-        })
-        .map_err(|err| {
-            eprintln!("client error: {:?}", err);
-        });
-
-    // Shut down the client after a timer future expires.
-    let client_timeout = client
-        .deadline(Instant::now() + Duration::from_secs(10))
-        .map_err(|_| {
-            eprintln!("client shutdown");
-        });
-
-    tokio::run(client_timeout);
+                write_conn.write("ACK".into())
+                    .expect("could not ACK message");
+            });
+        }
 
     Ok(())
 }
